@@ -2,12 +2,37 @@
 # install.packages(c("tidyverse", "tidytext", "pdftools"))
 library(tidyverse)
 library(tidytext)
+library(syuzhet)
+library(pdftools)
+
+
+setwd("C:/Users/Viktor/Documents/Stockholms Universitet/Statsvet Kandidiat/Statistik analys/UN_Negotiations")
 
 # Define the list of years
 years <- c("2023","2022","2021", "2020", "2019", "2018", "2017")
 
 # Initialize an empty data frame to store results
 all_country_sentiments <- data.frame()
+
+#Country abbreviations
+#country_abbreviations <- c(
+ # "United Kingdom of Great Britain and Northern Ireland","Ireland" = "United Kingdom",
+  #"United States of America", "USA", "U.S.A", "America", "American" = "USA"
+  # Add more mappings as needed
+#)
+
+#Suyzhet
+
+# Define the sentiment analysis function using syuzhet
+perform_sentiment_analysis <- function(text) {
+  # Get the sentiment score using one of syuzhet's methods, e.g., using the 'syuzhet' method
+  sentiment_scores <- get_sentiment(text, method = "syuzhet")
+  # Return the average sentiment score for the text
+  mean(sentiment_scores)
+}
+
+
+
 
 # Iterate over each year
 for (year in years) {
@@ -17,17 +42,21 @@ for (year in years) {
   # Get the list of PDF files in the folder
   pdf_files <- list.files(pdf_folder, pattern = "\\.pdf$", full.names = TRUE)
   
+  # Check if any files are found
+  if (length(pdf_files) == 0) {
+    stop("No PDF files found in the directory: ", pdf_folder)
+  }
+  
   # Iterate over each PDF file for the current year
   for (pdf_file in pdf_files) {
-    # Open the PDF file and extract English text
-    text <- pdftools::pdf_text(pdf_file) %>% paste(collapse = "\n")
+    # Open the PDF file and extract text
+    text <- pdf_text(pdf_file) %>% paste(collapse = "\n")
     
     # Define a regular expression to match English text
     english_pattern <- "[a-zA-Z]+"
     
     # Use str_extract_all to extract English words
-    english_text <- str_extract_all(text, english_pattern) %>%
-      unlist()
+    english_text <- str_extract_all(text, english_pattern) %>% unlist()
     
     # All the countries in the world
     world_countries <- c("Afghanistan", "Albania", "Algeria", "Andorra", "Angola", "Antigua and Barbuda", 
@@ -61,8 +90,7 @@ for (year in years) {
                          "Taiwan", "Tajikistan", "Tanzania", "Thailand", "Timor-Leste", "Togo", 
                          "Tonga", "Trinidad and Tobago", "Tunisia", "Turkey", "Turkmenistan", 
                          "Tuvalu", "Uganda", "Ukraine", "United Arab Emirates", "United Kingdom of Great Britain 
-                         and Northern Ireland",
-                         "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", 
+                         and Northern Ireland", "United States of America", "Uruguay", "Uzbekistan", "Vanuatu", "Vatican City", 
                          "Venezuela", "Vietnam", "Yemen", "Zambia", "Zimbabwe")
     
     # Section the data
@@ -85,51 +113,37 @@ for (year in years) {
     if (!is.null(current_country)) {
       country_data[[current_country]] <- current_words
     }
-    
-    # Sentiment analysis
-    bing_lexicon <- get_sentiments("bing")
-    
-    # Summarize sentiment scores for each country
+   
+     # Perform sentiment analysis for each country
     country_sentiments <- map_dfr(names(country_data), function(country) {
-      country_words <- unlist(country_data[[country]])
-      sentiment_scores <- inner_join(data.frame(text = country_words), bing_lexicon, by = c("text" = "word"))
-      score <- sum(ifelse(sentiment_scores$sentiment == "positive", 1, -1), na.rm = TRUE)
+      country_text <- paste(unlist(country_data[[country]]), collapse = " ")
+      sentiment_scores <- get_sentiment(country_text, method = "syuzhet")
+      score <- mean(sentiment_scores)  # Calculate the average sentiment
       tibble(year = year, country = country, score = score)
     })
+    
     
     # Append the results to the overall data frame
     all_country_sentiments <- bind_rows(all_country_sentiments, country_sentiments)
   }
 }
 
-# Rename "Ireland" to "UK" in the combined data frame
-all_country_sentiments$country[all_country_sentiments$country == "Ireland"] <- "UK"
 
-# Filter out rows with sentiment score = 0
-filtered_country_sentiments <- all_country_sentiments %>%
-  filter(score != 0)
-
-# Create a line graph to visualize sentiment scores over time
-ggplot(filtered_country_sentiments, aes(x = year, y = score, group = country, color = country)) +
-  geom_line() +
-  labs(title = "Sentiment Scores by Country Over Time",
-       x = "Year",
-       y = "Sentiment Score") +
-  theme_minimal() +
-  theme(legend.position = "bottom") +
-  scale_color_manual(values = rainbow(length(unique(filtered_country_sentiments$country))))
-
+#Rename "Ireland" to "UK" in the combined data frame
+all_country_sentiments$country[all_country_sentiments$country == "Ireland"] <- "United Kingdom"
+all_country_sentiments$country[all_country_sentiments$country == "UK"] <- "United Kingdom"
 
 #Aggregated bar chart
 
 
 # Combine sentiment scores for each country across different years
-combined_country_scores <- filtered_country_sentiments %>%
+final_sentiment_score <- all_country_sentiments %>%
   group_by(country) %>%
   summarize(score = sum(score))
 
 # Create a bar chart for the combined sentiment scores
-combined_plot <- ggplot(combined_country_scores, aes(x = reorder(country, score), y = score)) +
+
+combined_plot <- ggplot(final_sentiment_score, aes(x = reorder(country, score), y = score)) +
   geom_bar(stat = "identity", aes(fill = ifelse(score < 0, "Negative", "Positive")), color = "black") +
   geom_text(aes(label = abs(score), y = score + 15 * sign(score)), size = 3) +
   scale_fill_manual(values = c("Positive" = "blue", "Negative" = "red")) +
@@ -142,25 +156,8 @@ combined_plot <- ggplot(combined_country_scores, aes(x = reorder(country, score)
   theme(plot.background = element_rect(fill = "white")) +  # Set background to white
   theme(legend.position = "none")  # Remove legend
 
+print(combined_plot)
+
 # Save the combined bar chart as an image (you can adjust the file format and path)
 ggsave(filename = "combined_bar_chart.png", combined_plot)
 
-
-#Make this into a scale
-
-# Find the minimum and maximum scores
-min_score <- min(combined_country_scores$score)
-max_score <- max(combined_country_scores$score)
-
-# Define the desired range
-desired_min <- -100
-desired_max <- 100
-
-# Scale the scores to the desired range
-combined_country_scores$scaled_score <- ((combined_country_scores$score - min_score) / (max_score - min_score)) * (desired_max - desired_min) + desired_min
-
-# Now, combined_country_scores$scaled_score contains the scaled scores
-
-
-
-##Hämta AI index och lägg som oberoende varibel mot den beroende variabeln, 
